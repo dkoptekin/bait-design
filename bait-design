@@ -1,0 +1,141 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+"""
+@author: Dilek Koptekin
+"""
+
+from pybedtools import BedTool
+import pandas as pd
+import numpy as np
+import argparse
+import os
+import sys
+
+parser = argparse.ArgumentParser()
+
+parser.add_argument('-snp', "--selectedSNPs", dest='snpFile', required = True,
+                    help='targeted SNP information file')
+parser.add_argument('-fi', "--fasta", dest='fastaFile', required = True,
+                    help='Input fasta file to bedtools')
+parser.add_argument('-o', "--out", dest='outputFile',
+                    help='The name to give to the output file. [default="out.fa"]')
+parser.add_argument('-len', "--ProbeLength", dest='ProbeLength',
+                    help='Length of probes to design [default=60]', type=int)
+parser.add_argument('-n', "--ProbeNumber", dest='ProbeNumber',
+                    help='Must be 2 or 4. [default=4]' +
+                         'If n=2 two probes are centred on the SNP will design,' +
+                         'If n=4 four probes for each SNP target will design',
+                    default=4,
+                    type=int)
+
+args = parser.parse_args()
+
+if len(sys.argv) == 1:
+    parser.print_help()
+    sys.exit()
+
+
+#fasta = sys.argv[1]
+args = parser.parse_args()
+
+# name of files
+file=args.snpFile
+if args.outputFile:
+    outputFile=args.outputFile
+else:
+    outputFile="out.fa"
+
+# read file include information of targeted SNPs
+try:
+    df = pd.read_csv(file, sep=' ', comment='t', header=None)
+except Exception as e:
+    print ("The requested file that include information of targeted SNPs could not be opened. Exiting!", sys.argv[1])
+    sys.exit()
+df.columns = ['chr', 'posStart', 'posEnd', 'snpID','allele1', 'allele2']
+
+
+# check if fasta file exists
+fasta=args.fastaFile
+if os.path.exists(fasta):
+    print("%s reference genome are used" % fasta)
+else:
+    print("The requested fasta file could not be opened. Exiting!")
+    sys.exit()
+
+# assign length of probes
+if args.ProbeLength:
+    lengthOfprobes = args.ProbeLength
+    if lengthOfprobes % 2 != 0:
+      print("Length of probes must be even. Exiting!")
+      sys.exit()
+else:
+    lengthOfprobes = 60
+
+#get reference allel
+reference=pd.read_csv(BedTool.from_dataframe(df).sequence(fi=fasta, tab=True, name=True).seqfn, sep="\t", names=["snpID","ref"])
+reference.ref = reference.ref.str.upper() # in case ref allele is lowercase
+
+# bait - 1 (centred on the SNP - has reference allele)
+df_centred = df.copy()
+df_centred.posStart = df_centred.posStart - ((lengthOfprobes//2)-1)
+df_centred.posEnd = df_centred.posEnd + (lengthOfprobes//2)
+centredRef=pd.read_csv(BedTool.from_dataframe(df_centred).sequence(fi=fasta, tab=True, name=True).seqfn, sep="\t", names=["snpID","centredRefSeq"])
+
+# bait - 2 (centred on the SNP - has alternative allele)
+basecomplement = str.maketrans({'A': 'T', 'C': 'G', 'G': 'C', 'T': 'A'})
+df_centred['comp_allele1'] = df_centred['allele1'].apply(lambda x: x.translate(basecomplement))
+df_centred['comp_allele2'] = df_centred['allele2'].apply(lambda x: x.translate(basecomplement))
+df_centred = pd.merge(df_centred, reference, on='snpID')
+
+df_centred['alt'] = (np.select(
+                        condlist=[df_centred['allele1']==df_centred['ref'],df_centred['allele2']==df_centred['ref'], df_centred['comp_allele1']==df_centred['ref'], df_centred['comp_allele2']==df_centred['ref']],
+                        choicelist=[df_centred['allele2'], df_centred['allele1'],df_centred['comp_allele2'],df_centred['comp_allele1']],
+                        default=np.NaN
+))
+
+df_centred = pd.merge(df_centred, centredRef, on='snpID')
+
+df_centred['centredAltSeq'] = df_centred['centredRefSeq'].str[:((lengthOfprobes//2)-1)] + df_centred['alt'] + df_centred['centredRefSeq'].str[(lengthOfprobes//2):]
+
+headerA = ">chr" + df_centred.snpID.str.replace('_','-') + "-A"
+headerB = ">chr" + df_centred.snpID .str.replace('_','-') + "-B"
+
+df_final=df_centred[['snpID', 'centredRefSeq', 'centredAltSeq']]
+df_final.insert(1, "headerA", headerA)
+df_final.insert(3, "headerB", headerB)
+
+# assign number of probes
+if args.ProbeNumber:
+    numberOfprobes = args.ProbeNumber
+    if numberOfprobes == 2:
+        print("Two probes centred on the SNP are writing in %s" % outputFile)
+        df_final.set_index('snpID', inplace=True)
+        df_final.to_csv(outputFile, header=False, sep='\n', index=False, encoding='utf-8')
+        sys.exit()
+    elif numberOfprobes == 4:
+        # bait - 3 (just before the SNP)
+        df_before = df.copy()
+        df_before.posStart = df_before.posStart - (lengthOfprobes)
+        df_before.posEnd = df_before.posEnd - 1
+        before=pd.read_csv(BedTool.from_dataframe(df_before).sequence(fi=fasta, tab=True, name=True).seqfn, sep="\t", names=["snpID","beforeSeq"])
+
+        header_before = ">chr" + df_centred.snpID.str.replace('_','-') + "-before"
+        df_final.insert(df_final.shape[1], "header_before", header_before)
+        df_final=pd.merge(df_final, before, on='snpID')
+        # bait - 4 (just after the SNP)
+        df_after = df.copy()
+        df_after.posStart = df_after.posStart + 1
+        df_after.posEnd = df_after.posEnd + lengthOfprobes
+        after=pd.read_csv(BedTool.from_dataframe(df_after).sequence(fi=fasta, tab=True, name=True).seqfn, sep="\t", names=["snpID","afterSeq"])
+
+        header_after = ">chr" + df_centred.snpID.str.replace('_','-') + "-after"
+        df_final.insert(df_final.shape[1], "header_after", header_after)
+        df_final=pd.merge(df_final, after, on='snpID')
+        # write fasta file
+        print("Four probes for each targeted SNP are writing in %s" % outputFile)
+        df_final.set_index('snpID', inplace=True)
+        df_final.to_csv(outputFile, header=False, sep='\n', index=False, encoding='utf-8')
+    else:
+        print("n must be 2 or 4. Exiting!")
+        sys.exit()
