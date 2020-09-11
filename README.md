@@ -67,8 +67,8 @@ AAACAAAATTGGCAAGTAGAATTTAACTAAATGAAAGAGCTTCTGCACAGCAAGAGAAAC
 * *posStart* - The starting position of the SNP.
 * *posEnd* - The ending position of the SNP.
 * *snpID* - unique snp IDs
-* *allele1* - usually minor allele
-* *allele2* - usually major allele
+* *allele1* - usually major allele
+* *allele2* - usually minor allele
 
 ```
 example_targetedSNPs.txt
