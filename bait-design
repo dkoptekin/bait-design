@@ -48,7 +48,7 @@ else:
 
 # read file include information of targeted SNPs
 try:
-    df = pd.read_csv(file, sep=' ', comment='t', header=None)
+    df = pd.read_csv(file, delim_whitespace=True, comment='t', header=None)
 except Exception as e:
     print ("The requested file that include information of targeted SNPs could not be opened. Exiting!", sys.argv[1])
     sys.exit()
