@@ -84,3 +84,7 @@ example_targetedSNPs.txt
 1 903425  903426  1_903426  T C
 1 949653  949654  1_949654  A G
 ```
+
+## Citation
+
+[Yurtman, Özer, Yüncü et al. 2021, Communications Biology](https://doi.org/10.1038/s42003-021-02794-8)
